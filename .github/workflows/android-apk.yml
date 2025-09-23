@@ -1,4 +1,4 @@
-name: Android APK (auto-detect module)
+name: Android APK (auto-scan modules)
 
 on:
   push:
@@ -22,60 +22,38 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses
 
-      - name: Ensure gradlew executable
+      - name: Ensure gradlew
         run: chmod +x android/gradlew || true
 
-      # Montre la topologie Gradle pour trouver le bon module
-      - name: Show settings & projects
+      - name: List Gradle projects
         working-directory: android
         run: |
-          echo "=== settings.gradle(.kts) ==="
-          (cat settings.gradle || true)
-          (cat settings.gradle.kts || true)
-          echo "=== gradlew projects ==="
-          ./gradlew projects --no-daemon || true
+          echo "=== ./gradlew -q projects ==="
+          ./gradlew -q projects || true
 
-      # Auto-détection du module : on cherche un projet qui ressemble à app/android
-      - name: Build assembleDebug on detected module
+      - name: Try assembleDebug on each module until one succeeds
         working-directory: android
         run: |
           set -e
-          MOD=$(
-            ./gradlew projects --no-daemon \
-            | sed -n "s/^Project '\\(.*\\)'$/\\1/p" \
-            | grep -E "(:app$|:android$|:capacitor.*|:mobile$)" \
-            | head -n1
-          )
-          if [ -z "$MOD" ]; then
-            echo "⚠️  Aucun module détecté par heuristique; tentative sur :app"
-            MOD=":app"
-          fi
-          echo "➡️  Module ciblé = $MOD"
-          ./gradlew ${MOD}:assembleDebug --no-daemon --stacktrace --info
+          MODS=$(./gradlew -q projects | sed -n "s/^Project '\\(.*\\)'$/\\1/p" | grep '^:' || true)
+          echo "Modules détectés: $MODS"
+          # Ajoute des candidats courants si la liste est vide
+          if [ -z "$MODS" ]; then MODS=":app :android :mobile :capacitor-android"; fi
 
-      # Optionnel : on tente aussi un release, sans casser le job si ça échoue
-      - name: Optional assembleRelease
-        working-directory: android
-        run: |
-          set +e
-          for M in :app :android ; do
-            ./gradlew ${M}:assembleRelease --no-daemon --stacktrace --info && break
+          SUCCESS=0
+          for M in $MODS; do
+            echo "➡️  Tentative: ${M}:assembleDebug"
+            ./gradlew ${M}:assembleDebug --no-daemon --stacktrace --info && { echo "✅ OK sur $M"; SUCCESS=1; TARGET="$M"; break; } || echo "❌ Échec sur $M"
           done
-          true
 
-      # Listing clair des artefacts produits
-      - name: List produced artifacts
-        run: |
-          echo "== APK/AAB trouvés =="
-          find android -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
-          echo "== Dossiers outputs =="
-          ls -la android/app/build/outputs || true
-          ls -la android/app/build/outputs/apk || true
-          ls -la android/app/build/outputs/apk/debug || true
-          ls -la android/app/build/outputs/apk/release || true
-          ls -la android/app/build/outputs/bundle || true
+          if [ "$SUCCESS" = "0" ]; then
+            echo "Aucun module n'a build. Modules vus: $MODS"
+            exit 1
+          fi
 
-      # Upload APK/AAB où qu'ils soient
+          echo "== Listing outputs après build sur $TARGET =="
+          find . -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
+
       - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
         with:
