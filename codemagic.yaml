@@ -11,7 +11,7 @@ workflows:
       - name: Install Capacitor CLI
         script: npm install -g @capacitor/cli
 
-      # ⚠️ Écrire la config Capacitor à CHAQUE build (garanti)
+      # On garde la config (utile pour cap sync), mais le dossier android est déjà commité
       - name: Write capacitor.config.json
         script: |
           cat > capacitor.config.json <<'JSON'
@@ -23,16 +23,9 @@ workflows:
             "server": { "androidScheme": "https" }
           }
           JSON
-          cat capacitor.config.json
 
       - name: Build web app
         script: npm run build
-
-      - name: Ensure Android project exists
-        script: |
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
 
       - name: Sync Capacitor Android
         script: npx cap sync android
