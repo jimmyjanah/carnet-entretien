@@ -6,16 +6,32 @@ workflows:
       java: 17
     scripts:
       - name: Install dependencies
-        script: npm ci
+        script: npm ci || npm install
+
+      - name: Install Capacitor CLI
+        script: npm install -g @capacitor/cli
+
       - name: Build web app
         script: npm run build
+
+      - name: Ensure Capacitor config (init if missing)
+        script: |
+          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
+            npx cap init "Carnet d'Entretien" "com.jimmy.carnet" --web-dir=dist --npm-client npm --yes
+          fi
+
       - name: Ensure Android project exists
         script: |
           if [ ! -d android ]; then
             npx cap add android
           fi
+
       - name: Sync Capacitor Android
         script: npx cap sync android
+
+      - name: Ensure gradlew is executable
+        script: chmod +x android/gradlew || true
+
       - name: Build APK (release)
         script: |
           cd android
