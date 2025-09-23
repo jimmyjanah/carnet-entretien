@@ -11,14 +11,22 @@ workflows:
       - name: Install Capacitor CLI
         script: npm install -g @capacitor/cli
 
+      # ⚠️ Écrire la config Capacitor à CHAQUE build (garanti)
+      - name: Write capacitor.config.json
+        script: |
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.jimmy.carnet",
+            "appName": "Carnet d'Entretien",
+            "webDir": "dist",
+            "bundledWebRuntime": false,
+            "server": { "androidScheme": "https" }
+          }
+          JSON
+          cat capacitor.config.json
+
       - name: Build web app
         script: npm run build
-
-      - name: Ensure Capacitor config (init if missing)
-        script: |
-          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
-            npx cap init "Carnet d'Entretien" "com.jimmy.carnet" --web-dir=dist --npm-client npm --yes
-          fi
 
       - name: Ensure Android project exists
         script: |
