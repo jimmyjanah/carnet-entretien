@@ -2,7 +2,7 @@ workflows:
   android-app:
     name: Build Android APK
     environment:
-      node: 18
+      node: 20
       java: 17
     scripts:
       - name: Install dependencies
