@@ -1,4 +1,4 @@
-name: Android APK (Debug + MAX logs)
+name: Android APK (Debug + Error reveal)
 
 on:
   push:
@@ -10,14 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Show trees
-        run: |
-          pwd && ls -la
-          echo "---- android ----" && ls -la android || true
-          echo "---- wrapper ----" && ls -la android/gradle/wrapper || true
-          echo "---- app ----" && ls -la android/app || true
-          echo "---- web assets ----" && ls -la android/app/src/main/assets/public || true
 
       - uses: actions/setup-java@v4
         with:
@@ -36,37 +28,34 @@ jobs:
       - name: Gradle debug build (capture FULL log)
         working-directory: android
         run: |
-          set -euo pipefail
           ./gradlew --version
-          ./gradlew assembleDebug --no-daemon --stacktrace --info --console=plain | tee gradle-debug.log
-
-      # Si ça a échoué, on imprime les rapports détaillés AVANT d’échouer le job
-      - name: Dump Gradle problem reports
-        if: failure()
-        working-directory: android
-        run: |
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace --warning-mode all --console=plain | tee gradle-debug.log
+          EXIT=$?
           echo "==== SEARCH 'What went wrong' in gradle-debug.log ===="
-          grep -n "What went wrong" -n gradle-debug.log || true
-          echo "==== LAST 300 lines of gradle-debug.log ===="
-          tail -n 300 gradle-debug.log || true
+          grep -n "What went wrong" gradle-debug.log || true
+          echo "==== LAST 400 lines of gradle-debug.log ===="
+          tail -n 400 gradle-debug.log || true
 
-          echo "==== Problems reports (if any) ===="
+          echo "==== Problems report (if present) – plain text ===="
           if [ -d build/reports/problems ]; then
             for f in build/reports/problems/*; do
               echo "::group::$(basename "$f")"
-              sed -n '1,400p' "$f" || true
+              sed -e 's/<[^>]*>//g' -e 's/&nbsp;/ /g' -e 's/&gt;/>/g' -e 's/&lt;/</g' -e 's/&amp;/&/g' "$f" | sed -n '1,400p' || true
               echo "::endgroup::"
             done
           fi
           if [ -d app/build/reports/problems ]; then
             for f in app/build/reports/problems/*; do
               echo "::group::app/$(basename "$f")"
-              sed -n '1,400p' "$f" || true
+              sed -e 's/<[^>]*>//g' -e 's/&nbsp;/ /g' -e 's/&gt;/>/g' -e 's/&lt;/</g' -e 's/&amp;/&/g' "$f" | sed -n '1,400p' || true
               echo "::endgroup::"
             done
           fi
+          exit $EXIT
 
       - name: Upload ANY APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: apk-artifacts
