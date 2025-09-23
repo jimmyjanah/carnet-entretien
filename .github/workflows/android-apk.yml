@@ -1,4 +1,4 @@
-name: Android APK (Debug + Diagnostics)
+name: Android APK (Debug + Full Logs)
 
 on:
   push:
@@ -8,52 +8,63 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show repo tree (top level)
+      - name: Print repo & android tree
         run: |
           pwd
           ls -la
-
-      - name: Show Android tree (key paths)
-        run: |
+          echo "---- android ----"
           ls -la android || true
+          echo "---- app ----"
           ls -la android/app || true
+          echo "---- wrapper ----"
           ls -la android/gradle/wrapper || true
+          echo "---- web assets ----"
           ls -la android/app/src/main/assets/public || true
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
 
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses
 
-      - name: Make gradlew executable (safe)
+      - name: Ensure gradlew executable
         run: chmod +x android/gradlew || true
 
-      - name: List Gradle tasks (to confirm variants/modules)
+      - name: Show Gradle projects & tasks (debug info)
         working-directory: android
-        run: ./gradlew tasks --no-daemon --stacktrace || true
+        run: |
+          ./gradlew projects --no-daemon || true
+          ./gradlew tasks --no-daemon || true
 
-      - name: Build APK (Debug first, most likely to succeed)
+      - name: Build APK (Debug) with verbose logs
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace --info
+        env:
+          ORG_GRADLE_PROJECT_org.gradle.warning.mode: all
+        run: |
+          set -e
+          ./gradlew assembleDebug --no-daemon --stacktrace --info || {
+            echo "==== PROBLEMS REPORT (if present) ===="
+            if [ -d build/reports/problems ]; then
+              for f in build/reports/problems/*; do
+                echo "::group::$(basename "$f")"
+                sed -n '1,250p' "$f" || true
+                echo "::endgroup::"
+              done
+            fi
+            echo "==== LAST 200 lines of Gradle log (if any) ===="
+            find . -name "*.log" -type f -maxdepth 4 -print -exec tail -n 200 {} \; || true
+            exit 1
+          }
 
-      - name: Fallback Build (Release) if Debug missing (won't fail the job)
-        working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace --info || true
-
-      - name: Upload ANY APK we find
+      - name: Upload any APK found
         uses: actions/upload-artifact@v4
         with:
           name: apk-artifacts
