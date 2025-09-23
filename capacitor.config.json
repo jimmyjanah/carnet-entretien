@@ -1,0 +1,7 @@
+{
+  "appId": "com.jimmy.carnet",
+  "appName": "Carnet d'Entretien",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": { "androidScheme": "https" }
+}
