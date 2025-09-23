@@ -1,4 +1,4 @@
-name: Android APK (auto-scan modules)
+name: Android APK (final diag + smart build)
 
 on:
   push:
@@ -22,39 +22,64 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses
 
-      - name: Ensure gradlew
+      - name: Ensure gradlew executable
         run: chmod +x android/gradlew || true
 
-      - name: List Gradle projects
+      # 1) Montrer la configuration Gradle (pour trouver les modules)
+      - name: Print Gradle settings & projects
         working-directory: android
         run: |
-          echo "=== ./gradlew -q projects ==="
+          echo "===== settings.gradle ====="
+          (cat settings.gradle 2>/dev/null || true)
+          echo "===== settings.gradle.kts ====="
+          (cat settings.gradle.kts 2>/dev/null || true)
+          echo "===== root build.gradle(.kts) head ====="
+          (head -n 120 build.gradle 2>/dev/null || head -n 120 build.gradle.kts 2>/dev/null || true)
+          echo "===== ./gradlew -q projects ====="
           ./gradlew -q projects || true
 
-      - name: Try assembleDebug on each module until one succeeds
+      # 2) Lister toutes les tâches pour voir si assemble/assembleDebug existent
+      - name: List all tasks (no fail)
+        working-directory: android
+        run: |
+          ./gradlew -q tasks --all | sed -n '1,400p' || true
+
+      # 3) Build "global" (sans préciser de module) pour couvrir les cas non-standards
+      - name: Build assembleDebug (global)
+        working-directory: android
+        run: |
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace --info --console=plain | tee gradle-debug.log
+          echo "==== What went wrong (grep) ===="
+          grep -n "What went wrong" gradle-debug.log || true
+          exit ${PIPESTATUS[0]}
+
+      # 4) Si ça échoue, retente plusieurs variantes courantes (sans casser le log)
+      - name: Try common module variants
+        if: failure()
         working-directory: android
         run: |
           set -e
-          MODS=$(./gradlew -q projects | sed -n "s/^Project '\\(.*\\)'$/\\1/p" | grep '^:' || true)
-          echo "Modules détectés: $MODS"
-          # Ajoute des candidats courants si la liste est vide
-          if [ -z "$MODS" ]; then MODS=":app :android :mobile :capacitor-android"; fi
-
-          SUCCESS=0
-          for M in $MODS; do
-            echo "➡️  Tentative: ${M}:assembleDebug"
-            ./gradlew ${M}:assembleDebug --no-daemon --stacktrace --info && { echo "✅ OK sur $M"; SUCCESS=1; TARGET="$M"; break; } || echo "❌ Échec sur $M"
+          for M in :app :android :mobile :capacitor-android ; do
+            echo "➡️  Trying ${M}:assembleDebug"
+            ./gradlew ${M}:assembleDebug --no-daemon --stacktrace --info --console=plain && { echo "✅ OK $M"; touch built.ok; break; } || echo "❌ $M"
           done
+          test -f built.ok || (echo "No module succeeded"; exit 1)
 
-          if [ "$SUCCESS" = "0" ]; then
-            echo "Aucun module n'a build. Modules vus: $MODS"
-            exit 1
-          fi
+      # 5) Lister ce qui a été produit
+      - name: List produced artifacts
+        run: |
+          echo "== APK/AAB found =="
+          find android -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
+          echo "== app outputs =="
+          ls -la android/app/build/outputs 2>/dev/null || true
+          ls -la android/app/build/outputs/apk 2>/dev/null || true
+          ls -la android/app/build/outputs/apk/debug 2>/dev/null || true
+          ls -la android/app/build/outputs/bundle 2>/dev/null || true
 
-          echo "== Listing outputs après build sur $TARGET =="
-          find . -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
-
-      - name: Upload artifacts (APK/AAB)
+      # 6) Upload quoi qu'il arrive
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: app-builds
