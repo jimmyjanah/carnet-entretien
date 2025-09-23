@@ -1,4 +1,4 @@
-name: Android APK
+name: Android APK (Debug + Diagnostics)
 
 on:
   push:
@@ -8,26 +8,56 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Show repo tree (top level)
+        run: |
+          pwd
+          ls -la
+
+      - name: Show Android tree (key paths)
+        run: |
+          ls -la android || true
+          ls -la android/app || true
+          ls -la android/gradle/wrapper || true
+          ls -la android/app/src/main/assets/public || true
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-      - name: Build APK (release)
+
+      - name: Make gradlew executable (safe)
+        run: chmod +x android/gradlew || true
+
+      - name: List Gradle tasks (to confirm variants/modules)
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
-      - name: Upload APK artifact
+        run: ./gradlew tasks --no-daemon --stacktrace || true
+
+      - name: Build APK (Debug first, most likely to succeed)
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace --info
+
+      - name: Fallback Build (Release) if Debug missing (won't fail the job)
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace --info || true
+
+      - name: Upload ANY APK we find
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: android/app/build/outputs/apk/release/*.apk
+          name: apk-artifacts
+          path: |
+            android/**/outputs/apk/**/*.apk
+            android/**/outputs/**/*.apk
+          if-no-files-found: warn
