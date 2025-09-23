@@ -1,4 +1,4 @@
-name: Android APK (catch artifacts)
+name: Android APK (auto-detect module)
 
 on:
   push:
@@ -25,29 +25,57 @@ jobs:
       - name: Ensure gradlew executable
         run: chmod +x android/gradlew || true
 
-      # Build le module 'app' en Debug (le plus sûr)
-      - name: Build :app:assembleDebug
+      # Montre la topologie Gradle pour trouver le bon module
+      - name: Show settings & projects
         working-directory: android
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace --info
+        run: |
+          echo "=== settings.gradle(.kts) ==="
+          (cat settings.gradle || true)
+          (cat settings.gradle.kts || true)
+          echo "=== gradlew projects ==="
+          ./gradlew projects --no-daemon || true
 
-      # En plus, tente un release (si dispo) sans faire échouer le job
-      - name: Optional :app:assembleRelease
+      # Auto-détection du module : on cherche un projet qui ressemble à app/android
+      - name: Build assembleDebug on detected module
         working-directory: android
-        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace --info || true
+        run: |
+          set -e
+          MOD=$(
+            ./gradlew projects --no-daemon \
+            | sed -n "s/^Project '\\(.*\\)'$/\\1/p" \
+            | grep -E "(:app$|:android$|:capacitor.*|:mobile$)" \
+            | head -n1
+          )
+          if [ -z "$MOD" ]; then
+            echo "⚠️  Aucun module détecté par heuristique; tentative sur :app"
+            MOD=":app"
+          fi
+          echo "➡️  Module ciblé = $MOD"
+          ./gradlew ${MOD}:assembleDebug --no-daemon --stacktrace --info
 
-      # Liste tout ce qui ressemble à un artefact (debug/release, apk/aab)
+      # Optionnel : on tente aussi un release, sans casser le job si ça échoue
+      - name: Optional assembleRelease
+        working-directory: android
+        run: |
+          set +e
+          for M in :app :android ; do
+            ./gradlew ${M}:assembleRelease --no-daemon --stacktrace --info && break
+          done
+          true
+
+      # Listing clair des artefacts produits
       - name: List produced artifacts
         run: |
-          echo "== Listing outputs =="
+          echo "== APK/AAB trouvés =="
           find android -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
-          echo "== Tree of standard output dirs =="
+          echo "== Dossiers outputs =="
           ls -la android/app/build/outputs || true
           ls -la android/app/build/outputs/apk || true
           ls -la android/app/build/outputs/apk/debug || true
           ls -la android/app/build/outputs/apk/release || true
           ls -la android/app/build/outputs/bundle || true
 
-      # Upload APK + AAB où qu'ils soient
+      # Upload APK/AAB où qu'ils soient
       - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
         with:
