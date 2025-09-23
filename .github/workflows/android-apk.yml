@@ -1,4 +1,4 @@
-name: Android APK (Debug + Full Logs)
+name: Android APK (Debug + MAX logs)
 
 on:
   push:
@@ -11,18 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Print repo & android tree
+      - name: Show trees
         run: |
-          pwd
-          ls -la
-          echo "---- android ----"
-          ls -la android || true
-          echo "---- app ----"
-          ls -la android/app || true
-          echo "---- wrapper ----"
-          ls -la android/gradle/wrapper || true
-          echo "---- web assets ----"
-          ls -la android/app/src/main/assets/public || true
+          pwd && ls -la
+          echo "---- android ----" && ls -la android || true
+          echo "---- wrapper ----" && ls -la android/gradle/wrapper || true
+          echo "---- app ----" && ls -la android/app || true
+          echo "---- web assets ----" && ls -la android/app/src/main/assets/public || true
 
       - uses: actions/setup-java@v4
         with:
@@ -38,37 +33,42 @@ jobs:
       - name: Ensure gradlew executable
         run: chmod +x android/gradlew || true
 
-      - name: Show Gradle projects & tasks (debug info)
+      - name: Gradle debug build (capture FULL log)
         working-directory: android
         run: |
-          ./gradlew projects --no-daemon || true
-          ./gradlew tasks --no-daemon || true
+          set -euo pipefail
+          ./gradlew --version
+          ./gradlew assembleDebug --no-daemon --stacktrace --info --console=plain | tee gradle-debug.log
 
-      - name: Build APK (Debug) with verbose logs
+      # Si ça a échoué, on imprime les rapports détaillés AVANT d’échouer le job
+      - name: Dump Gradle problem reports
+        if: failure()
         working-directory: android
-        env:
-          ORG_GRADLE_PROJECT_org.gradle.warning.mode: all
         run: |
-          set -e
-          ./gradlew assembleDebug --no-daemon --stacktrace --info || {
-            echo "==== PROBLEMS REPORT (if present) ===="
-            if [ -d build/reports/problems ]; then
-              for f in build/reports/problems/*; do
-                echo "::group::$(basename "$f")"
-                sed -n '1,250p' "$f" || true
-                echo "::endgroup::"
-              done
-            fi
-            echo "==== LAST 200 lines of Gradle log (if any) ===="
-            find . -name "*.log" -type f -maxdepth 4 -print -exec tail -n 200 {} \; || true
-            exit 1
-          }
+          echo "==== SEARCH 'What went wrong' in gradle-debug.log ===="
+          grep -n "What went wrong" -n gradle-debug.log || true
+          echo "==== LAST 300 lines of gradle-debug.log ===="
+          tail -n 300 gradle-debug.log || true
 
-      - name: Upload any APK found
+          echo "==== Problems reports (if any) ===="
+          if [ -d build/reports/problems ]; then
+            for f in build/reports/problems/*; do
+              echo "::group::$(basename "$f")"
+              sed -n '1,400p' "$f" || true
+              echo "::endgroup::"
+            done
+          fi
+          if [ -d app/build/reports/problems ]; then
+            for f in app/build/reports/problems/*; do
+              echo "::group::app/$(basename "$f")"
+              sed -n '1,400p' "$f" || true
+              echo "::endgroup::"
+            done
+          fi
+
+      - name: Upload ANY APK
         uses: actions/upload-artifact@v4
         with:
           name: apk-artifacts
-          path: |
-            android/**/outputs/apk/**/*.apk
-            android/**/outputs/**/*.apk
+          path: android/**/outputs/**/*.apk
           if-no-files-found: warn
