@@ -1,0 +1,21 @@
+workflows:
+  android-app:
+    name: Build Android APK
+    environment:
+      sdk: 31
+      node: latest
+    scripts:
+      - name: Install dependencies
+        script: npm install
+      - name: Build web app
+        script: npm run build
+      - name: Copy build to Capacitor
+        script: npx cap copy
+      - name: Sync Android
+        script: npx cap sync android
+      - name: Build APK
+        script: |
+          cd android
+          ./gradlew assembleRelease
+    artifacts:
+      - android/app/build/outputs/apk/release/app-release.apk
