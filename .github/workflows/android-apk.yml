@@ -1,4 +1,4 @@
-name: Android APK (Debug + Error reveal)
+name: Android APK (catch artifacts)
 
 on:
   push:
@@ -25,39 +25,34 @@ jobs:
       - name: Ensure gradlew executable
         run: chmod +x android/gradlew || true
 
-      - name: Gradle debug build (capture FULL log)
+      # Build le module 'app' en Debug (le plus sûr)
+      - name: Build :app:assembleDebug
         working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace --info
+
+      # En plus, tente un release (si dispo) sans faire échouer le job
+      - name: Optional :app:assembleRelease
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace --info || true
+
+      # Liste tout ce qui ressemble à un artefact (debug/release, apk/aab)
+      - name: List produced artifacts
         run: |
-          ./gradlew --version
-          set +e
-          ./gradlew assembleDebug --no-daemon --stacktrace --warning-mode all --console=plain | tee gradle-debug.log
-          EXIT=$?
-          echo "==== SEARCH 'What went wrong' in gradle-debug.log ===="
-          grep -n "What went wrong" gradle-debug.log || true
-          echo "==== LAST 400 lines of gradle-debug.log ===="
-          tail -n 400 gradle-debug.log || true
+          echo "== Listing outputs =="
+          find android -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
+          echo "== Tree of standard output dirs =="
+          ls -la android/app/build/outputs || true
+          ls -la android/app/build/outputs/apk || true
+          ls -la android/app/build/outputs/apk/debug || true
+          ls -la android/app/build/outputs/apk/release || true
+          ls -la android/app/build/outputs/bundle || true
 
-          echo "==== Problems report (if present) – plain text ===="
-          if [ -d build/reports/problems ]; then
-            for f in build/reports/problems/*; do
-              echo "::group::$(basename "$f")"
-              sed -e 's/<[^>]*>//g' -e 's/&nbsp;/ /g' -e 's/&gt;/>/g' -e 's/&lt;/</g' -e 's/&amp;/&/g' "$f" | sed -n '1,400p' || true
-              echo "::endgroup::"
-            done
-          fi
-          if [ -d app/build/reports/problems ]; then
-            for f in app/build/reports/problems/*; do
-              echo "::group::app/$(basename "$f")"
-              sed -e 's/<[^>]*>//g' -e 's/&nbsp;/ /g' -e 's/&gt;/>/g' -e 's/&lt;/</g' -e 's/&amp;/&/g' "$f" | sed -n '1,400p' || true
-              echo "::endgroup::"
-            done
-          fi
-          exit $EXIT
-
-      - name: Upload ANY APK
-        if: always()
+      # Upload APK + AAB où qu'ils soient
+      - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
         with:
-          name: apk-artifacts
-          path: android/**/outputs/**/*.apk
+          name: app-builds
+          path: |
+            android/**/outputs/**/*.apk
+            android/**/outputs/**/*.aab
           if-no-files-found: warn
