@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,44 +27,75 @@ jobs:
         run: yes | sdkmanager --licenses || true
 
       - name: Ensure gradlew executable
-        run: chmod +x android/gradlew
+        run: chmod +x android/gradlew || true
 
-      # 🟢 Étape diagnostic
-      - name: Print Gradle settings & projects
+      # --- DIAG MAXIMUM ---
+      - name: Show filesystem + Gradle version
         working-directory: android
         run: |
-          echo "===== settings.gradle ====="
+          pwd
+          ./gradlew --version
+          echo "==== android tree (top) ===="
+          ls -la
+          echo "==== settings.gradle ===="
           (cat settings.gradle 2>/dev/null || true)
-          echo "===== settings.gradle.kts ====="
+          echo "==== settings.gradle.kts ===="
           (cat settings.gradle.kts 2>/dev/null || true)
-          echo "===== ./gradlew -q projects ====="
-          ./gradlew -q projects || true
 
-      - name: Build assembleDebug (global) + full log
+      - name: List all Gradle tasks
         working-directory: android
+        run: ./gradlew tasks --all --no-daemon --console=plain || true
+
+      - name: Build assembleDebug (global) with FULL log
+        working-directory: android
+        env:
+          # Active tous les warnings et stacktraces
+          GRADLE_OPTS: "-Dorg.gradle.warning.mode=all -Dorg.gradle.logging.stacktrace=full"
         run: |
           set +e
-          ./gradlew assembleDebug --no-daemon --stacktrace --warning-mode all --console=plain | tee build.log
-          status=${PIPESTATUS[0]}
-          echo "==== What went wrong (grep) ===="
-          grep -n "What went wrong" -n build.log -A 40 || true
-          exit $status
+          ./gradlew assembleDebug --no-daemon --stacktrace --info --console=plain | tee build.log
+          code=${PIPESTATUS[0]}
+          echo "==== TAIL 200 LINES (global) ===="
+          tail -n 200 build.log || true
+          exit $code
 
-      - name: Try :app:assembleDebug if global failed
+      - name: Fallback :app:assembleDebug (module direct)
         if: failure()
         working-directory: android
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.warning.mode=all -Dorg.gradle.logging.stacktrace=full"
         run: |
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace --warning-mode all --console=plain | tee build-app.log
+          set +e
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace --info --console=plain | tee build-app.log
+          code=${PIPESTATUS[0]}
+          echo "==== TAIL 200 LINES (:app) ===="
+          tail -n 200 build-app.log || true
+          exit $code
 
-      - name: Upload Gradle logs
+      # --- UPLOAD TOUS LES RAPPORTS DIAG ---
+      - name: Upload Gradle problem reports & logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gradle-logs
+          name: gradle-diagnostics
           path: |
             android/build.log
             android/build-app.log
+            android/build/reports/problems/**
+            android/app/build/reports/**
           if-no-files-found: ignore
+
+      # --- CHASSE A L'APK ---
+      - name: List produced artifacts
+        if: always()
+        run: |
+          echo "==== APK/AAB found ===="
+          find android -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
+          echo "==== outputs dirs ===="
+          ls -la android/app/build/outputs || true
+          ls -la android/app/build/outputs/apk || true
+          ls -la android/app/build/outputs/apk/debug || true
+          ls -la android/app/build/outputs/bundle || true
 
       - name: Upload APK artifact
         if: always()
