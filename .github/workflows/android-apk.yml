@@ -78,12 +78,12 @@ jobs:
           ls -la android/app/build/outputs/bundle 2>/dev/null || true
 
       # 6) Upload quoi qu'il arrive
-      - name: Upload artifacts
+            - name: Upload APK artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-builds
+          name: app-apk
           path: |
-            android/**/outputs/**/*.apk
-            android/**/outputs/**/*.aab
+            android/app/build/outputs/apk/**/*.apk
+            android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: warn
