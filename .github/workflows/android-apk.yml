@@ -1,9 +1,8 @@
-name: Android APK
+name: Android APK (Debug + Full Logs)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -14,96 +13,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---- Node & web build (Capacitor a BESOIN de node_modules) ----
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install NPM deps
+        run: npm ci
+
+      - name: Build web assets (dist/)
+        run: npm run build
+
+      - name: Capacitor sync android
+        run: npx cap sync android
+
+      # ---- Android toolchain ----
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: "17"
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Accept SDK licenses
-        run: yes | sdkmanager --licenses || true
+        run: yes | sdkmanager --licenses
 
-      - name: Ensure gradlew executable
-        run: chmod +x android/gradlew || true
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
 
-      # --- DIAG MAXIMUM ---
-      - name: Show filesystem + Gradle version
+      # ---- Build APK ----
+      - name: Build assembleDebug
         working-directory: android
-        run: |
-          pwd
-          ./gradlew --version
-          echo "==== android tree (top) ===="
-          ls -la
-          echo "==== settings.gradle ===="
-          (cat settings.gradle 2>/dev/null || true)
-          echo "==== settings.gradle.kts ===="
-          (cat settings.gradle.kts 2>/dev/null || true)
+        run: ./gradlew assembleDebug --stacktrace
 
-      - name: List all Gradle tasks
-        working-directory: android
-        run: ./gradlew tasks --all --no-daemon --console=plain || true
-
-      - name: Build assembleDebug (global) with FULL log
-        working-directory: android
-        env:
-          # Active tous les warnings et stacktraces
-          GRADLE_OPTS: "-Dorg.gradle.warning.mode=all -Dorg.gradle.logging.stacktrace=full"
-        run: |
-          set +e
-          ./gradlew assembleDebug --no-daemon --stacktrace --info --console=plain | tee build.log
-          code=${PIPESTATUS[0]}
-          echo "==== TAIL 200 LINES (global) ===="
-          tail -n 200 build.log || true
-          exit $code
-
-      - name: Fallback :app:assembleDebug (module direct)
-        if: failure()
-        working-directory: android
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.warning.mode=all -Dorg.gradle.logging.stacktrace=full"
-        run: |
-          set +e
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace --info --console=plain | tee build-app.log
-          code=${PIPESTATUS[0]}
-          echo "==== TAIL 200 LINES (:app) ===="
-          tail -n 200 build-app.log || true
-          exit $code
-
-      # --- UPLOAD TOUS LES RAPPORTS DIAG ---
-      - name: Upload Gradle problem reports & logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-diagnostics
-          path: |
-            android/build.log
-            android/build-app.log
-            android/build/reports/problems/**
-            android/app/build/reports/**
-          if-no-files-found: ignore
-
-      # --- CHASSE A L'APK ---
-      - name: List produced artifacts
-        if: always()
-        run: |
-          echo "==== APK/AAB found ===="
-          find android -type f \( -name "*.apk" -o -name "*.aab" \) -print || true
-          echo "==== outputs dirs ===="
-          ls -la android/app/build/outputs || true
-          ls -la android/app/build/outputs/apk || true
-          ls -la android/app/build/outputs/apk/debug || true
-          ls -la android/app/build/outputs/bundle || true
-
+      # ---- Récupère l’APK en artefact ----
       - name: Upload APK artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-apk
+          name: apk-artifacts
           path: |
             android/app/build/outputs/apk/**/*.apk
-            android/**/outputs/**/*.apk
-            android/**/outputs/**/*.aab
           if-no-files-found: warn
